@@ -123,6 +123,11 @@ function percent(completed: number, total: number) {
   return total === 0 ? 0 : Math.round((completed / total) * 100);
 }
 
+function firstIncompleteWeekId(appProgress: AppProgress): string {
+  const week = trainingWeeks.find((item) => !appProgress.weeks[item.id]?.completed);
+  return week?.id ?? trainingWeeks[trainingWeeks.length - 1].id;
+}
+
 export function TrainingMap() {
   const [profiles, setProfiles] = useState<TraineeProfile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState("");
@@ -167,7 +172,9 @@ export function TrainingMap() {
     setActiveProfileId(nextActiveId);
     if (nextActiveId) {
       const profile = nextProfiles.find((item) => item.id === nextActiveId);
-      setProgress(normalizeProgress(readJson(progressKey(nextActiveId), null), profile?.name ?? ""));
+      const loadedProgress = normalizeProgress(readJson(progressKey(nextActiveId), null), profile?.name ?? "");
+      setProgress(loadedProgress);
+      setExpandedWeeks(new Set([firstIncompleteWeekId(loadedProgress)]));
       window.localStorage.setItem(activeProfileKey, nextActiveId);
     }
     setLoaded(true);
@@ -189,9 +196,8 @@ export function TrainingMap() {
       selectedTexts(week.blockers, progress.weeks[week.id].blockers).map((blocker) => ({ week, blocker })),
     );
     const completedWeekList = trainingWeeks.filter((week) => progress.weeks[week.id].completed);
-    const inProgressWeeks = trainingWeeks.filter((week) => statusLabel(progress.weeks[week.id]) === "In Progress");
 
-    return { totalItems, completedItems, completedWeeks, overallPercent, currentWeek, selectedBlockers, completedWeekList, inProgressWeeks };
+    return { totalItems, completedItems, completedWeeks, overallPercent, currentWeek, selectedBlockers, completedWeekList };
   }, [progress]);
 
   useEffect(() => {
@@ -223,7 +229,9 @@ export function TrainingMap() {
     if (activeProfileId) window.localStorage.setItem(progressKey(activeProfileId), JSON.stringify(progress));
     setActiveProfileId(profileId);
     window.localStorage.setItem(activeProfileKey, profileId);
-    setProgress(normalizeProgress(readJson(progressKey(profileId), null), profile.name));
+    const nextProgress = normalizeProgress(readJson(progressKey(profileId), null), profile.name);
+    setProgress(nextProgress);
+    setExpandedWeeks(new Set([firstIncompleteWeekId(nextProgress)]));
   }
 
   function createProfile(name: string) {
@@ -268,7 +276,7 @@ export function TrainingMap() {
 
   function deleteActiveProfile() {
     if (!activeProfile) return;
-    if (!window.confirm(`确定要删除 ${activeProfile.name} 的本机 profile 和进度吗？其他 profile 不会受影响。`)) return;
+    if (!window.confirm(`移除此 profile：${activeProfile.name}？\n这只会删除当前浏览器中的这个 trainee profile，不会影响其他人。`)) return;
     window.localStorage.removeItem(progressKey(activeProfile.id));
     const nextProfiles = profiles.filter((profile) => profile.id !== activeProfile.id);
     saveProfiles(nextProfiles);
@@ -277,7 +285,9 @@ export function TrainingMap() {
     if (nextActive) {
       window.localStorage.setItem(activeProfileKey, nextActive);
       const nextProfile = nextProfiles[0];
-      setProgress(normalizeProgress(readJson(progressKey(nextActive), null), nextProfile.name));
+      const nextProgress = normalizeProgress(readJson(progressKey(nextActive), null), nextProfile.name);
+      setProgress(nextProgress);
+      setExpandedWeeks(new Set([firstIncompleteWeekId(nextProgress)]));
     } else {
       window.localStorage.removeItem(activeProfileKey);
       setProgress(emptyProgress());
@@ -352,7 +362,7 @@ export function TrainingMap() {
   }
 
   function suggestedNextStep() {
-    if (!totals.currentWeek) return "和 trainer 复盘下一阶段实战安排。";
+    if (!totals.currentWeek) return "和 trainer 复盘下一阶段的成长计划。";
     const blockers = selectedTexts(totals.currentWeek.blockers, progress.weeks[totals.currentWeek.id].blockers);
     if (blockers.length > 0) return `先请 trainer 帮你解决：${blockers[0].zh}`;
     if (nextAction?.item) return `完成：${nextAction.item.zh}`;
@@ -362,37 +372,31 @@ export function TrainingMap() {
   function buildReport() {
     const current = totals.currentWeek;
     const currentProgress = current ? progress.weeks[current.id] : null;
-    const currentCompleted = currentProgress?.checked.filter(Boolean).length ?? totals.totalItems;
     const completedWeeks = totals.completedWeekList.map((week) => `- Week ${week.weekNumber} ${week.title.zh}`).join("\n");
-    const inProgressWeeks = totals.inProgressWeeks.map((week) => `- Week ${week.weekNumber} ${week.title.zh}`).join("\n");
     const allBlockers = totals.selectedBlockers.map(({ week, blocker }) => `- Week ${week.weekNumber}: ${blocker.zh}`).join("\n");
     const currentNotes = currentProgress?.notes.trim() || "暂无";
 
     return [
-      "新人训练进度汇报",
-      "New Recruit Training Progress",
+      "新人训练地图 · 当前训练进度",
+      "New Recruit Training Map · Current Training Progress",
       "",
-      `Trainee: ${activeProfile?.name || progress.recruitName || "未填写"}`,
-      `Current Week: ${current ? `Week ${current.weekNumber} ${current.title.zh}` : "Completed"}`,
-      `Progress: ${totals.completedItems}/${totals.totalItems} tasks completed (${totals.overallPercent}%)`,
-      `Completed Weeks: ${totals.completedWeeks}/8`,
-      `Current Focus: ${current ? `Week ${current.weekNumber} ${current.title.zh}` : "8 周已全部完成"}`,
-      `Next Step: ${suggestedNextStep()}`,
+      `学员 / Trainee: ${activeProfile?.name || progress.recruitName || "未填写"}`,
+      `当前周 / Current Week: ${current ? `Week ${current.weekNumber} ${current.title.zh}` : "已全部完成"}`,
+      `总进度 / Overall Progress: ${totals.overallPercent}%`,
+      `已完成任务 / Completed Tasks: ${totals.completedItems}/${totals.totalItems}`,
+      `已完成周 / Completed Weeks: ${totals.completedWeeks}/8`,
       "",
-      "Completed Weeks:",
+      "已完成的周 / Completed Weeks:",
       completedWeeks || "- 暂无",
       "",
-      "In-progress Weeks:",
-      inProgressWeeks || "- 暂无",
-      "",
-      "Current Week Tasks:",
-      current ? `- ${currentCompleted}/${current.checklist.length} completed` : "- 全部完成",
-      "",
-      "Current Blockers:",
+      "当前卡点 / Current Blockers:",
       allBlockers || "- 暂无",
       "",
-      "Notes:",
+      "训练笔记 / Notes:",
       currentNotes,
+      "",
+      "建议下一步 / Suggested Next Step:",
+      suggestedNextStep(),
     ].join("\n");
   }
 
@@ -458,7 +462,7 @@ export function TrainingMap() {
 
   function resetProgress() {
     if (!activeProfile) return;
-    if (window.confirm(`确定只清空 ${activeProfile.name} 的训练进度吗？其他 trainee profile 不会被重置。`)) {
+    if (window.confirm(`重置当前进度：${activeProfile.name}？\n这只会重置当前 trainee profile 的进度，不会影响其他 profile。`)) {
       const next = emptyProgress(activeProfile.name);
       setProgress(next);
       window.localStorage.setItem(progressKey(activeProfile.id), JSON.stringify(next));
@@ -482,10 +486,11 @@ export function TrainingMap() {
             <p className="mt-4 text-sm leading-6 text-slate-700">第一次使用，请先建立你的 trainee profile。多人共用一台电脑时，每个人都可以切换到自己的本机进度。</p>
             <div className="mt-5 rounded-xl bg-blue-50 p-4 text-xs leading-5 text-blue-900">
               <p>进度仅保存在当前浏览器。不同设备不会自动同步。</p>
+              <p className="mt-1">请不要在本工具中输入客户姓名、电话、微信、地址或任何敏感资料。</p>
               <p className="mt-1">如果多人共用一台电脑，请先切换到自己的 trainee profile。</p>
             </div>
             <label className="mt-5 block text-sm font-bold text-slate-900">
-              Your Name / 你的名字
+              名字 / Name
               <input
                 className="focus-ring mt-2 w-full rounded-xl border border-slate-300 px-3 py-3 text-base"
                 onChange={(event) => setNewProfileName(event.target.value)}
@@ -514,11 +519,13 @@ export function TrainingMap() {
               <p className="text-sm font-semibold text-blue-700">WFG 新人基础训练</p>
               <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">新人训练地图</h1>
               <p className="mt-1 text-base font-medium text-slate-500">New Recruit Training Map</p>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-700">8 周完成从了解业务、考证准备、邀约练习，到跟随 trainer 实战的基础训练。</p>
+              <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-700">8 周完成从理解事业模式、整理服务对象方向、确认执照路径、学习客户服务流程，到在 trainer 支持下进行专业沟通的基础训练。</p>
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">A guided 8-week onboarding map for understanding the business, preparing for licensing, learning client service, and growing through trainer support.</p>
               <div className="mt-3 max-w-2xl rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-600">
-                <p>进度仅保存在当前浏览器。本工具不保存客户名单、联系方式或敏感资料。</p>
-                <p className="mt-1">进度仅保存在当前浏览器。不同设备不会自动同步。</p>
+                <p>进度仅保存在当前浏览器。不同设备不会自动同步。</p>
+                <p className="mt-1">请不要在本工具中输入客户姓名、电话、微信、地址或任何敏感资料。</p>
                 <p className="mt-1">如果多人共用一台电脑，请先切换到自己的 trainee profile。</p>
+                <p className="mt-2 text-slate-400">Progress is saved only in this browser. Do not enter client names, phone numbers, WeChat IDs, addresses, or sensitive information.</p>
               </div>
             </div>
             <ProfileSwitcher
@@ -592,14 +599,15 @@ export function TrainingMap() {
         <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p className="text-sm font-semibold text-blue-700">给 Trainer 的汇报</p>
-              <h2 className="mt-1 text-2xl font-bold text-slate-950">Trainer Report</h2>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">自动整理当前 trainee 的当前周进度、卡点、笔记和建议下一步，方便复制到 WeChat 发给 trainer。</p>
+              <p className="text-sm font-semibold text-blue-700">给 Trainer 的进度汇报</p>
+              <h2 className="mt-1 text-2xl font-bold text-slate-950">Progress Update for Trainer</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">自动整理当前 trainee 的训练进度、卡点、笔记和下一步，方便发给 trainer 做跟进。</p>
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Summarizes the trainee&apos;s current progress, blockers, notes, and next step for trainer follow-up.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <ActionButton icon={<ClipboardCopy size={16} />} label="Copy Report" onClick={copyProgressReport} primary />
-              <ActionButton icon={<Download size={16} />} label="Export Backup" onClick={exportProgress} />
-              <ActionButton icon={<RotateCcw size={16} />} label="Reset Current" onClick={resetProgress} danger />
+              <ActionButton icon={<ClipboardCopy size={16} />} label="复制汇报 / Copy Report" onClick={copyProgressReport} primary />
+              <ActionButton icon={<Download size={16} />} label="导出备份 / Export Backup" onClick={exportProgress} />
+              <ActionButton icon={<RotateCcw size={16} />} label="重置当前进度 / Reset This Profile" onClick={resetProgress} danger />
             </div>
           </div>
           <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
@@ -630,7 +638,7 @@ export function TrainingMap() {
               value={importText}
             />
             <button className="focus-ring mt-3 min-h-11 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50" onClick={importProgress} type="button">
-              导入进度 / Import Progress
+              导入备份 / Import Backup
             </button>
           </div>
         </section>
@@ -709,11 +717,11 @@ export function TrainingMap() {
 
                     <label className="mt-5 block text-sm font-bold text-slate-950">
                       训练笔记
-                      <span className="mt-0.5 block text-xs font-medium text-slate-500">Notes for questions, trainer feedback, and next steps.</span>
+                      <span className="mt-0.5 block text-xs font-medium text-slate-500">Notes for questions, trainer feedback, and next steps. Do not enter private contact details.</span>
                       <textarea
                         className="focus-ring mt-2 min-h-28 w-full rounded-xl border border-slate-300 px-3 py-3 text-base font-normal text-slate-950"
                         onChange={(event) => updateNotes(week.id, event.target.value)}
-                        placeholder="写下问题、trainer 反馈或下一步。不要输入客户名单、电话或微信。"
+                        placeholder="写下问题、trainer 反馈或下一步。请不要输入客户姓名、电话或微信。"
                         value={weekProgress.notes}
                       />
                     </label>
@@ -761,9 +769,10 @@ function ProfileSwitcher({
   return (
     <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Trainee Profile</p>
+      <p className="text-xs font-medium text-slate-500">当前 trainee profile</p>
       <p className="mt-1 text-lg font-bold text-slate-950">{activeProfile?.name ?? "未选择"}</p>
       <label className="mt-3 block text-xs font-bold text-slate-700">
-        切换 profile
+        切换 profile / Switch Profile
         <select className="focus-ring mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm" onChange={(event) => onSwitch(event.target.value)} value={activeProfileId}>
           {profiles.map((profile) => (
             <option key={profile.id} value={profile.id}>{profile.name}</option>
@@ -771,25 +780,25 @@ function ProfileSwitcher({
         </select>
       </label>
       <div className="mt-3 flex flex-wrap gap-2">
-        <button className="focus-ring rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-100" onClick={onRename} type="button">Rename</button>
-        <button className="focus-ring rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50" onClick={onDelete} type="button">Delete</button>
+        <button className="focus-ring rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-100" onClick={onRename} type="button">重命名 / Rename</button>
+        <button className="focus-ring rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50" onClick={onDelete} type="button">移除此 profile / Remove Profile</button>
       </div>
       <div className="mt-4 border-t border-slate-200 pt-4">
         <label className="block text-xs font-bold text-slate-700">
-          新建 trainee profile
+          新建 trainee profile / Create New Profile
           <input
             className="focus-ring mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
             onChange={(event) => onNameChange(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") onCreate();
             }}
-            placeholder="名字"
+            placeholder="名字 / Name"
             value={newProfileName}
           />
         </label>
         <button className="focus-ring mt-2 inline-flex min-h-10 items-center gap-2 rounded-xl bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800" onClick={onCreate} type="button">
           <UserPlus size={14} />
-          Create Profile
+          创建 Profile / Create Profile
         </button>
       </div>
     </div>

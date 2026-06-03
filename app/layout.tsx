@@ -22,7 +22,10 @@ export default function RootLayout({
                 New Recruit Training Map
               </span>
             </a>
-            <span className="hidden text-sm font-medium text-slate-500 sm:inline">Local checklist MVP</span>
+            <span className="hidden text-right leading-tight sm:block">
+              <span className="block text-sm font-semibold text-slate-700">本地保存</span>
+              <span className="block text-xs font-medium text-slate-400">Progress saved locally</span>
+            </span>
           </nav>
         </header>
         {children}
